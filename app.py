@@ -37,6 +37,10 @@ FEATURE_MAX = {
 def load_model():
     df = pd.read_csv('EPL_combined.csv')
     df['FTR_encoded'] = df['FTR'].map({'A': 0, 'D': 1, 'H': 2})
+
+    # 1. Compute feature means from the full dataset
+    feature_means = df[FEATURES].mean().round(1).to_dict()
+
     X = df[FEATURES]
     y = df['FTR_encoded']
     X_train, X_test, y_train, y_test = train_test_split(
@@ -44,11 +48,17 @@ def load_model():
     )
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled  = scaler.transform(X_test)
+
     model = LogisticRegression(solver='lbfgs', max_iter=1000, random_state=42)
     model.fit(X_train_scaled, y_train)
-    return model, scaler
 
-model, scaler = load_model()
+    # 3. Compute test accuracy on the same split
+    test_accuracy = model.score(X_test_scaled, y_test)
+
+    return model, scaler, feature_means, test_accuracy
+
+model, scaler, feature_means, test_accuracy = load_model()
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -77,33 +87,42 @@ with col_left:
 
     st.markdown('**Shots on Target**')
     c1, c2 = st.columns(2)
-    HST  = c1.number_input(FEATURE_LABELS['HST'],  0, FEATURE_MAX['HST'],  5, key='HST')
-    AST  = c2.number_input(FEATURE_LABELS['AST'],  0, FEATURE_MAX['AST'],  4, key='AST')
+    HST  = c1.number_input(FEATURE_LABELS['HST'],  0, FEATURE_MAX['HST'],  int(feature_means['HST']),  key='HST')
+    AST  = c2.number_input(FEATURE_LABELS['AST'],  0, FEATURE_MAX['AST'],  int(feature_means['AST']),  key='AST')
 
     st.markdown('**Corners**')
     c3, c4 = st.columns(2)
-    HC   = c3.number_input(FEATURE_LABELS['HC'],   0, FEATURE_MAX['HC'],   5, key='HC')
-    AC   = c4.number_input(FEATURE_LABELS['AC'],   0, FEATURE_MAX['AC'],   4, key='AC')
+    HC   = c3.number_input(FEATURE_LABELS['HC'],   0, FEATURE_MAX['HC'],   int(feature_means['HC']),   key='HC')
+    AC   = c4.number_input(FEATURE_LABELS['AC'],   0, FEATURE_MAX['AC'],   int(feature_means['AC']),   key='AC')
 
     st.markdown('**Yellow Cards**')
     c5, c6 = st.columns(2)
-    HY   = c5.number_input(FEATURE_LABELS['HY'],   0, FEATURE_MAX['HY'],   2, key='HY')
-    AY   = c6.number_input(FEATURE_LABELS['AY'],   0, FEATURE_MAX['AY'],   2, key='AY')
+    HY   = c5.number_input(FEATURE_LABELS['HY'],   0, FEATURE_MAX['HY'],   int(feature_means['HY']),   key='HY')
+    AY   = c6.number_input(FEATURE_LABELS['AY'],   0, FEATURE_MAX['AY'],   int(feature_means['AY']),   key='AY')
 
     st.markdown('**Red Cards**')
     c7, c8 = st.columns(2)
-    HR   = c7.number_input(FEATURE_LABELS['HR'],   0, FEATURE_MAX['HR'],   0, key='HR')
-    AR   = c8.number_input(FEATURE_LABELS['AR'],   0, FEATURE_MAX['AR'],   0, key='AR')
+    HR   = c7.number_input(FEATURE_LABELS['HR'],   0, FEATURE_MAX['HR'],   int(feature_means['HR']),   key='HR')
+    AR   = c8.number_input(FEATURE_LABELS['AR'],   0, FEATURE_MAX['AR'],   int(feature_means['AR']),   key='AR')
 
     st.markdown('**Half-Time Goals**')
     c9, c10 = st.columns(2)
-    HTHG = c9.number_input(FEATURE_LABELS['HTHG'], 0, FEATURE_MAX['HTHG'], 0, key='HTHG')
-    HTAG = c10.number_input(FEATURE_LABELS['HTAG'], 0, FEATURE_MAX['HTAG'], 0, key='HTAG')
+    HTHG = c9.number_input(FEATURE_LABELS['HTHG'], 0, FEATURE_MAX['HTHG'], int(feature_means['HTHG']), key='HTHG')
+    HTAG = c10.number_input(FEATURE_LABELS['HTAG'], 0, FEATURE_MAX['HTAG'], int(feature_means['HTAG']), key='HTAG')
+
+    # 2. Soft input validation warnings
+    if HR > 0 and HST > 8:
+        st.warning("⚠️ Unusual combination: high home shots on target with a red card is rare. The model will still predict, but interpret with caution.")
+    if AR > 0 and AST > 8:
+        st.warning("⚠️ Unusual combination: high away shots on target with a red card is rare. The model will still predict, but interpret with caution.")
 
     predict_btn = st.button('Predict Outcome', use_container_width=True, type='primary')
 
 with col_right:
     st.subheader('Prediction Result')
+
+    # 3. Show model test accuracy
+    st.metric('Model Test Accuracy', f'{test_accuracy * 100:.1f}%')
 
     if predict_btn:
         input_data = np.array([[HST, AST, HC, AC, HY, AY, HR, AR, HTHG, HTAG]])
@@ -111,7 +130,7 @@ with col_right:
         proba = model.predict_proba(input_scaled)[0]
         pred_class = model.predict(input_scaled)[0]
 
-        label_map = {0: 'Away Win', 1: 'Draw', 2: 'Home Win'}
+        label_map  = {0: 'Away Win', 1: 'Draw', 2: 'Home Win'}
         colour_map = {0: COLOURS['A'], 1: COLOURS['D'], 2: COLOURS['H']}
         emoji_map  = {0: '🔴', 1: '🟡', 2: '🟢'}
 
@@ -128,6 +147,9 @@ with col_right:
             f"</div>",
             unsafe_allow_html=True
         )
+
+        # 4. Label explanation caption
+        st.caption("H = Home team wins at full time | D = Draw | A = Away team wins at full time")
 
         st.markdown('')
 
@@ -147,7 +169,12 @@ with col_right:
         ax.spines['right'].set_visible(False)
         plt.tight_layout()
         st.pyplot(fig)
-        plt.close()
+
+        # 5. Close the specific figure object
+        plt.close(fig)
+
+        # 6. Confidence note below the chart
+        st.caption("ℹ️ Draw predictions carry lower confidence — draws are the hardest outcome to predict in football (model Draw F1 ≈ 0.22).")
 
         # Probability table
         prob_df = pd.DataFrame({
